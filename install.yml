@@ -1,0 +1,116 @@
+---
+- hosts: all
+
+  tasks:
+
+  - name: Create the directory where Kolibri content will live.
+    become: yes
+    file:
+      path: /KOLIBRI_DATA/content
+      state: directory
+      owner: pi
+
+  - name: Create the directory where Kolibri data will live.
+    file:
+      path: /home/pi/.kolibri
+      state: directory
+
+  - name: Copy in the skeleton Kolibri options.ini file.
+    copy:
+      src: files/options.ini
+      dest: /home/pi/.kolibri/options.ini
+
+  - name: Add the Kolibri PPA
+    become: yes
+    apt_repository:
+      repo: deb http://ppa.launchpad.net/learningequality/kolibri/ubuntu xenial main
+      state: present
+      filename: learningequality-ubuntu-kolibri-xenial
+
+  - name: Add the PPA signing key
+    become: yes
+    apt_key:
+      id: DC5BAA93F9E4AE4F0411F97C74F88ADB3194DD81
+      keyserver: keyserver.ubuntu.com
+
+  - name: Update repository cache, and upgrade everything
+    become: yes
+    apt:
+      update_cache: yes
+      upgrade: yes
+
+  - name: Install necessary packages
+    become: yes
+    apt:
+      name: "{{ packages }}"
+    vars:
+      packages:
+      - kolibri
+      - dnsmasq
+      - hostapd
+      - nginx
+
+  - name: Insert/update dhcpcd.conf settings block
+    become: yes
+    blockinfile:
+      path: /etc/dhcpcd.conf
+      block: |
+        interface wlan0
+            static ip_address=10.10.10.10/24
+            nohook resolv.conf, wpa_supplicant
+
+  - name: Copy in dnsmasq configuration
+    become: yes
+    copy:
+      src: files/dnsmasq_hotspot.conf
+      dest: /etc/dnsmasq.d/hotspot.conf
+
+  - name: Set up custom hostapd conf file.
+    become: yes
+    copy:
+      src: files/hostapd.conf
+      dest: /etc/hostapd/hostapd.conf
+
+  - name: Insert/update hostapd settings block
+    become: yes
+    blockinfile:
+      path: /etc/default/hostapd
+      block: |
+        DAEMON_CONF="/etc/hostapd/hostapd.conf"
+
+  - name: Ensure dnsmasq doesn't interfere with local DNS
+    become: yes
+    blockinfile:
+      path: /etc/default/dnsmasq
+      block: |
+        DNSMASQ_EXCEPT=lo
+
+  - name: Remove the default nginx config file (so it won't conflict).
+    become: yes
+    file:
+      path: /etc/nginx/sites-enabled/default
+      state: absent
+
+  - name: Set up custom nginx conf file.
+    become: yes
+    copy:
+      src: files/nginx_kolibri_conf
+      dest: /etc/nginx/sites-enabled/kolibri
+
+  - name: Ensure services are unmasked, enabled, and restarted.
+    become: yes
+    systemd:
+      name: "{{ item }}"
+      enabled: yes
+      masked: no
+      state: restarted
+    loop:
+      - dhcpcd
+      - hostapd
+      - dnsmasq
+      - nginx
+      - kolibri
+
+
+# TODO (stretch goal): get it working in both AP and client wifi modes at the same time!
+# https://blog.thewalr.us/2017/09/26/raspberry-pi-zero-w-simultaneous-ap-and-managed-mode-wifi/
